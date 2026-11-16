@@ -306,25 +306,31 @@
     const kv = (k, v) => v ? '<div class="kv"><b>' + k + '</b>' + esc(v) + '</div>' : '';
     page('<section class="card"><div class="big-id">' + esc(box.box_id) + '</div><h1>' + esc(box.name) + '</h1>' +
       (box.archived ? '<p class="warn">This box is archived (hidden).</p>' : '') +
-      (box.cover_photo_id ? '<div id="big">' + thumbImg(box.cover_photo_id, 'th') + '<span class="note"> Loading the clear picture…</span></div>' : '') +
+      (box.cover_photo_id ? '<button class="photo" id="bPhoto">' + thumbImg(box.cover_photo_id, 'th big') + '<span class="note">Tap the picture to see it bigger</span></button>' : '') +
       kv('Looks like', box.looks_like) + kv('Kept at', locLabel(box.loc_id) || 'No place chosen yet') +
       kv('Whose', box.owner) + kv('Notes', box.notes) + kv('Status', box.status) + '</section>' +
       '<p class="note center">Adding things inside the box comes in the next step.</p>' +
       btn('bMove', 'Move this box', 'tape') + btn('bEdit', 'Change details', 'ghost') + btn('bBack', 'Back to start', 'ghost'));
     on('bMove', () => go('#/move/' + id)); on('bEdit', () => go('#/edit/' + id)); on('bBack', () => go('#/'));
-    if (box.cover_photo_id) loadFull(box.cover_photo_id);
+    on('bPhoto', () => openBig(box.cover_photo_id));
     needThumbs([box.cover_photo_id]);
   }
 
-  async function loadFull(pid) {
-    const show = src => { const el = $('big'); if (el && location.hash.toLowerCase().indexOf('#/box/') === 0) el.innerHTML = '<img class="full" alt="" src="' + src + '">'; };
-    if (state.full[pid]) return show(state.full[pid]);
-    if (state.offline) { const n = $('big') && $('big').querySelector('.note'); if (n) n.textContent = ' (small picture, no internet)'; return; }
+  // Tap the small picture: open the big clear one on top of the screen.
+  async function openBig(pid) {
+    const old = $('lb'); if (old) old.remove();
+    const lb = document.createElement('div'); lb.id = 'lb';
+    lb.innerHTML = '<button class="big tape" id="lbClose">Close</button><div id="lbBody"><p class="note">Opening the picture…</p></div>';
+    document.body.appendChild(lb);
+    $('lbClose').onclick = () => lb.remove();
+    const body = $('lbBody');
+    if (state.full[pid]) { body.innerHTML = '<img alt="" src="' + state.full[pid] + '">'; return; }
+    if (state.offline) { body.innerHTML = '<p class="note">No internet to open the big picture.</p>'; return; }
     try {
       const p = await api('getPhoto', { photo_id: pid });
       state.full[pid] = 'data:' + p.mime + ';base64,' + p.data;
-      show(state.full[pid]);
-    } catch (e) { const n = $('big') && $('big').querySelector('.note'); if (n) n.textContent = ' (the clear picture could not be loaded)'; }
+      body.innerHTML = '<img alt="" src="' + state.full[pid] + '">';
+    } catch (e) { body.innerHTML = '<p class="note">' + esc(e.code === 'NETWORK' ? 'No internet to open the big picture.' : (e.message || 'Could not open it.')) + '</p>'; }
   }
 
   function showBoxForm(raw, mode) {
@@ -466,6 +472,7 @@
   }
 
   function route() {
+    const lb = $('lb'); if (lb) lb.remove();
     const h = location.hash || '#/';
     const d = s => { try { return decodeURIComponent(s); } catch (e) { return s; } };
     let m;
