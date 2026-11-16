@@ -1,7 +1,8 @@
 :root{--bg:#f2f5f7;--ink:#14232b;--muted:#4d6068;--teal:#0f4c5c;--tape:#f2b705;--card:#fff;--line:#cfd9de}
 *{box-sizing:border-box}
 html,body{margin:0}
-body{font:20px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Noto Sans Tamil",sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+html{font-size:calc(16px*var(--s,1))}
+body{font:1.25rem/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Noto Sans Tamil",sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
 header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 16px;background:var(--teal);color:#fff;font-weight:700}
 main{max-width:560px;margin:0 auto;padding:18px 16px 40px}
 h1{font-size:1.7rem;line-height:1.2;margin:.1em 0 .3em}
@@ -47,8 +48,6 @@ img.th.big{width:120px;height:120px;border-radius:10px;border:3px solid var(--li
 #lb button.big{margin-bottom:14px}
 #lb img{display:block;width:100%;height:auto;border-radius:8px}
 #lb .note{color:#cfd9de}
-.ta{font-weight:600;color:var(--muted);font-size:.85em}
-button.big .ta{display:block;color:inherit;opacity:.95;font-size:.85em;margin-top:2px}
 button.big.primary .ta{color:#fff}
 label .ta,h1 .ta,h2 .ta{margin-left:.4em}
 h1 .ta{font-size:.6em}
@@ -63,3 +62,15 @@ mark{background:#ffe27a;color:inherit;border-radius:3px;padding:0 2px}
 .segb{font:inherit;font-weight:800;font-size:1.2rem;min-height:68px;border-radius:12px;border:3px solid var(--teal);background:#fff;color:var(--teal)}
 .segb.sel{background:var(--teal);color:#fff}
 .segb .ta{display:block;color:inherit;font-size:.85em}
+
+/* Tamil text: smaller, lighter and in its own colour, so it is easy to tell from the English */
+.ta{font-weight:400;font-size:.78em;color:#8a4b00;letter-spacing:0}
+button.big .ta{display:block;margin-top:5px;padding-top:5px;border-top:1px solid currentColor;font-weight:500;font-size:.8em;color:inherit;opacity:.92}
+button.big.primary .ta{color:#ffe9b8}
+button.big.tape .ta{color:#5a3300}
+button.big.ghost .ta{color:#8a4b00}
+.segb .ta{display:block;color:inherit;font-size:.78em;font-weight:500}
+.segb.sel .ta{color:#ffe9b8}
+header .ta{color:#ffe9b8}
+.no-ta .ta{display:none!important}
+.card .ta,.kv b .ta{color:#8a4b00}

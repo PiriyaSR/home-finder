@@ -11,6 +11,15 @@
   function recall(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   const norm = s => String(s || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
   const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+  /* ---------- this phone's settings: text size, Tamil words on/off ---------- */
+  const SIZES = [['0.9', 'Small', 'சிறியது'], ['1', 'Normal', 'சாதாரணம்'], ['1.15', 'Large', 'பெரியது'], ['1.3', 'Extra large', 'மிகப் பெரியது']];
+  function prefs() { try { return Object.assign({ size: '1', tamil: '1' }, JSON.parse(recall('hf_prefs') || '{}')); } catch (e) { return { size: '1', tamil: '1' }; } }
+  function applyPrefs() {
+    const p = prefs();
+    document.documentElement.style.setProperty('--s', p.size);
+    document.documentElement.classList.toggle('no-ta', p.tamil === '0');
+  }
+  function setPref(k, v) { const p = prefs(); p[k] = v; keep('hf_prefs', JSON.stringify(p)); applyPrefs(); }
   const ta = t => t ? '<span class="ta">' + esc(t) + '</span>' : '';
 
   function normId(raw) {
@@ -349,6 +358,20 @@
       });
     };
     inp.oninput = draw;
+  }
+
+  function showSettings() {
+    const p = prefs();
+    page('<h1>Settings <span class="ta">அமைப்புகள்</span></h1><p class="note">These choices are only for this phone.</p>' +
+      '<h2>Text size <span class="ta">எழுத்தின் அளவு</span></h2><div class="seg">' +
+      SIZES.map(z => '<button class="segb' + (p.size === z[0] ? ' sel' : '') + '" data-size="' + z[0] + '">' + z[1] + '<span class="ta">' + z[2] + '</span></button>').join('') + '</div>' +
+      '<h2>Tamil words <span class="ta">தமிழ்</span></h2><div class="seg">' +
+      '<button class="segb' + (p.tamil === '1' ? ' sel' : '') + '" data-tamil="1">Show Tamil beside English<span class="ta">தமிழ் காட்டு</span></button>' +
+      '<button class="segb' + (p.tamil === '0' ? ' sel' : '') + '" data-tamil="0">English only</button></div>' +
+      btn('bBack', 'Done', 'primary', 'முடிந்தது'));
+    view.querySelectorAll('[data-size]').forEach(b => { b.onclick = () => { setPref('size', b.getAttribute('data-size')); showSettings(); }; });
+    view.querySelectorAll('[data-tamil]').forEach(b => { b.onclick = () => { setPref('tamil', b.getAttribute('data-tamil')); showSettings(); }; });
+    on('bBack', () => go('#/'));
   }
 
   /* ---------- Home ---------- */
@@ -810,6 +833,7 @@
     if ((m = h.match(/^#\/additem\/([^/?]+)/i))) return showItemForm(d(m[1]), 'new');
     if ((m = h.match(/^#\/edititem\/([^/?]+)/i))) return showItemForm(d(m[1]), 'edit');
     if ((m = h.match(/^#\/item\/([^/?]+)/i))) return showItem(d(m[1]));
+    if (/^#\/settings/i.test(h)) return showSettings();
     if (/^#\/search/i.test(h)) return showSearch();
     if (/^#\/boxes/i.test(h)) return showBoxes();
     if (/^#\/newbox/i.test(h)) return showNewBoxAsk();
@@ -827,7 +851,8 @@
     if (bad(CFG.SCRIPT_URL) || bad(CFG.CLIENT_ID)) {
       return showMessage('Setup not finished', 'Open config.js, type in the Web app URL and the Client ID, then upload it to GitHub again.');
     }
-    loadThumbCache();
+    loadThumbCache(); applyPrefs();
+    if (!$('bSettings')) { const sb = document.createElement('button'); sb.id = 'bSettings'; sb.className = 'link'; sb.textContent = 'Settings'; sb.onclick = () => go('#/settings'); bar.insertBefore(sb, $('signout')); }
     const t = recall('hf_token');
     let exp = 0;
     try { exp = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp * 1000; } catch (e) {}
