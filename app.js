@@ -3,7 +3,7 @@
   const CFG = window.HOME_FINDER || {};
   const view = document.getElementById('view');
   const bar = document.getElementById('bar');
-  const state = { token: null, me: null, data: null, installEvt: null, thumbs: {}, offline: false, flash: '' };
+  const state = { token: null, me: null, data: null, installEvt: null, thumbs: {}, full: {}, offline: false, flash: '' };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -306,18 +306,25 @@
     const kv = (k, v) => v ? '<div class="kv"><b>' + k + '</b>' + esc(v) + '</div>' : '';
     page('<section class="card"><div class="big-id">' + esc(box.box_id) + '</div><h1>' + esc(box.name) + '</h1>' +
       (box.archived ? '<p class="warn">This box is archived (hidden).</p>' : '') +
-      (box.cover_photo_id ? '<button class="photo" id="bPhoto">' + thumbImg(box.cover_photo_id, 'cover') + '<span class="note">Tap the picture to see it bigger</span></button><div id="big"></div>' : '') +
+      (box.cover_photo_id ? '<div id="big">' + thumbImg(box.cover_photo_id, 'th') + '<span class="note"> Loading the clear picture…</span></div>' : '') +
       kv('Looks like', box.looks_like) + kv('Kept at', locLabel(box.loc_id) || 'No place chosen yet') +
       kv('Whose', box.owner) + kv('Notes', box.notes) + kv('Status', box.status) + '</section>' +
       '<p class="note center">Adding things inside the box comes in the next step.</p>' +
       btn('bMove', 'Move this box', 'tape') + btn('bEdit', 'Change details', 'ghost') + btn('bBack', 'Back to start', 'ghost'));
     on('bMove', () => go('#/move/' + id)); on('bEdit', () => go('#/edit/' + id)); on('bBack', () => go('#/'));
-    on('bPhoto', async () => {
-      $('big').innerHTML = '<p class="note">Opening picture…</p>';
-      try { const p = await api('getPhoto', { photo_id: box.cover_photo_id }); $('big').innerHTML = '<img class="full" alt="" src="data:' + esc(p.mime) + ';base64,' + p.data + '">'; }
-      catch (e) { $('big').innerHTML = '<p class="note">' + esc(e.code === 'NETWORK' ? 'No internet to open the big picture.' : (e.message || 'Could not open it.')) + '</p>'; }
-    });
+    if (box.cover_photo_id) loadFull(box.cover_photo_id);
     needThumbs([box.cover_photo_id]);
+  }
+
+  async function loadFull(pid) {
+    const show = src => { const el = $('big'); if (el && location.hash.toLowerCase().indexOf('#/box/') === 0) el.innerHTML = '<img class="full" alt="" src="' + src + '">'; };
+    if (state.full[pid]) return show(state.full[pid]);
+    if (state.offline) { const n = $('big') && $('big').querySelector('.note'); if (n) n.textContent = ' (small picture, no internet)'; return; }
+    try {
+      const p = await api('getPhoto', { photo_id: pid });
+      state.full[pid] = 'data:' + p.mime + ';base64,' + p.data;
+      show(state.full[pid]);
+    } catch (e) { const n = $('big') && $('big').querySelector('.note'); if (n) n.textContent = ' (the clear picture could not be loaded)'; }
   }
 
   function showBoxForm(raw, mode) {
@@ -337,8 +344,9 @@
       '<p class="hint">A short, easy name that no other box has. For example: Sun, Mango, Blue.</p>' +
       '<label for="fLook">What does the box look like?</label><textarea id="fLook" maxlength="300" rows="3">' + esc(b.looks_like || '') + '</textarea>' +
       '<p class="hint">For example: Brown cardboard box with a red tape.</p>' +
-      '<label>Picture of the outside</label><div id="prev">' + (b.cover_photo_id ? thumbImg(b.cover_photo_id, 'cover') : '') + '</div>' +
-      '<input id="fPhoto" type="file" accept="image/*" hidden>' + btn('bPick', b.cover_photo_id ? 'Take a new picture' : 'Take a picture', 'ghost') +
+      '<label>Picture of the outside</label><div id="prev">' + (b.cover_photo_id ? thumbImg(b.cover_photo_id, 'th') : '') + '</div>' +
+      '<input id="fCam" type="file" accept="image/*" capture="environment" hidden><input id="fPhoto" type="file" accept="image/*" hidden>' +
+      btn('bCam', b.cover_photo_id ? 'Take a new picture now' : 'Take a picture now', 'tape') + btn('bPick', 'Choose a picture from the phone', 'ghost') +
       '<label for="fOwner">Whose organiser or box</label><select id="fOwner">' + owners.join('') + '</select>' +
       '<label for="pl">Where is it kept?</label>' + pickerHTML(b.loc_id) +
       '<label for="fNotes">Notes (optional)</label><textarea id="fNotes" maxlength="500" rows="2">' + esc(b.notes || '') + '</textarea></section>' +
@@ -346,19 +354,26 @@
     wirePicker();
     needThumbs([b.cover_photo_id]);
     on('bPick', () => $('fPhoto').click());
-    $('fPhoto').onchange = async () => {
-      const f = $('fPhoto').files[0]; if (!f) return;
+    on('bCam', () => $('fCam').click());
+    const gotPhoto = async ev => {
+      const f = ev.target.files[0]; if (!f) return;
       $('prev').innerHTML = '<p class="note">Preparing picture…</p>';
       try { photo = await shrinkPhoto(f); $('prev').innerHTML = '<img class="cover" alt="" src="' + photo.preview + '">'; }
       catch (e) { photo = null; $('prev').innerHTML = ''; showErr({ code: 'INVALID', message: 'That picture could not be used. Please try another one.' }); }
     };
+    $('fPhoto').onchange = gotPhoto; $('fCam').onchange = gotPhoto;
     on('bCancel', () => go('#/box/' + id));
     on('bSave', async () => {
       $('err').hidden = true;
       const name = $('fName').value.trim();
       if (!name) return showErr({ code: 'INVALID', message: 'Please give the box a name.' });
       const clash = (state.data.boxes || []).find(x => x.box_id !== id && norm(x.name) === norm(name));
-      if (clash) return showErr({ code: 'INVALID', message: 'The name "' + name + '" is already used by box ' + clash.box_id + '. Please choose another name.' });
+      if (clash) {
+        showErr({ code: 'INVALID', message: 'The name "' + clash.name + '" is already used by box ' + clash.box_id + (locLabel(clash.loc_id) ? ' (kept at ' + locLabel(clash.loc_id) + ')' : '') + '. This box needs a different name.' });
+        const lk = document.createElement('a'); lk.href = '#/box/' + clash.box_id; lk.className = 'lk'; lk.textContent = 'Look at box ' + clash.box_id;
+        $('err').appendChild(document.createElement('br')); $('err').appendChild(lk);
+        return;
+      }
       if (mode === 'new' && !$('pl').value) return showErr({ code: 'INVALID', message: 'Please choose where the box is kept.' });
       busy('bSave', true);
       try {
