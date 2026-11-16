@@ -25,7 +25,7 @@
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: action, token: state.token, data: data || {} })
       });
-    } catch (e) { throw { code: 'NETWORK', message: 'The phone has no internet right now.' }; }
+    } catch (e) { throw { code: 'NETWORK', message: 'The phone has no internet right now.', detail: String(e && e.message || e) }; }
     let out;
     try { out = await res.json(); } catch (e) { throw { code: 'ERROR', message: 'The server gave an unexpected reply.' }; }
     if (!out.ok) throw { code: out.code, message: out.error };
@@ -74,7 +74,7 @@
     const code = e && e.code, msg = (e && e.message) || 'Something went wrong.';
     if (code === 'AUTH') { keep('hf_token', null); state.token = null; return showSignIn('Please sign in again.'); }
     if (code === 'DENIED') return showMessage('Not on the family list', 'This Google account is not allowed yet. Ask the person who manages the app to add it, or sign in with a different account.', [{ label: 'Use another account', fn: signOut }]);
-    showMessage(code === 'NETWORK' ? 'No internet' : 'Could not open the app', msg, [{ label: 'Try again', fn: load }]);
+    showMessage(code === 'NETWORK' ? 'No internet' : 'Could not open the app', msg + (e && e.detail ? '  [Technical: ' + e.detail + ' | Address starts: ' + String(CFG.SCRIPT_URL).slice(0, 45) + ' | online: ' + navigator.onLine + ']' : ''), [{ label: 'Try again', fn: load }]);
   }
 
   async function load() {
