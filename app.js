@@ -643,36 +643,69 @@
   }
 
   /* ----- history ----- */
-  const FIELD_WORDS = { name: 'the name', looks_like: 'what it looks like', type_id: 'the type', owner: 'whose it is', notes: 'the notes', cover_photo_id: 'the picture', status: 'the status',
-    also_called: 'the other names', description: 'the details', qty: 'the number', photo_id: 'the picture', room: 'the room', shelf: 'the shelf', row: 'the row', note: 'the note', looks: 'what it looks like', loc_id: 'the place' };
+  const FIELD_WORDS = { name: 'Name', looks_like: 'Looks like', type_id: 'Type', owner: 'Whose', notes: 'Notes', cover_photo_id: 'Picture', status: 'Status',
+    also_called: 'Other names', description: 'Details', qty: 'How many', photo_id: 'Picture', room: 'Room', shelf: 'Shelf', row: 'Row', note: 'Note', loc_id: 'Place' };
+  // kind of history entry: label, Tamil, colour class
+  const CATS = {
+    added:   { en: 'Added', ta: 'சேர்க்கப்பட்டது' },
+    moved:   { en: 'Moved', ta: 'நகர்த்தப்பட்டது' },
+    out:     { en: 'Taken out', ta: 'வெளியே எடுத்தது' },
+    used:    { en: 'Used up', ta: 'தீர்ந்துவிட்டது' },
+    back:    { en: 'Back in box', ta: 'மீண்டும் பெட்டியில்' },
+    changed: { en: 'Changed', ta: 'மாற்றப்பட்டது' },
+    fresh:   { en: 'Fresh start', ta: 'புதிதாகத் தொடக்கம்' },
+    hidden:  { en: 'Hidden', ta: 'மறைக்கப்பட்டது' },
+    restored:{ en: 'Restored', ta: 'மீட்கப்பட்டது' }
+  };
   function boxWord(id) { const b = findBox(id); return b ? b.name + ' (' + id + ')' : id; }
+  const short = v => { v = String(v == null ? '' : v); return v.length > 40 ? v.slice(0, 40) + '…' : v; };
+
+  // One history row -> { cat, label, kind, subject, lines[] }
   function describe(h) {
     let d = {}; try { d = JSON.parse(h.details || '{}') || {}; } catch (e) {}
     const t = h.target, nm = d.name || '', ch = d.changes || {};
-    const fields = skip => Object.keys(ch).filter(k => k !== skip).map(k => FIELD_WORDS[k] || k).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+    const changeLines = () => Object.keys(ch).map(k => {
+      const w = FIELD_WORDS[k] || k;
+      if (k === 'cover_photo_id' || k === 'photo_id') return w + ': new picture';
+      if (k === 'type_id') return w + ': ' + (typeName(ch[k][0]) || 'none') + ' → ' + (typeName(ch[k][1]) || 'none');
+      return w + ': ' + (ch[k][0] ? short(ch[k][0]) : '(empty)') + ' → ' + (ch[k][1] ? short(ch[k][1]) : '(empty)');
+    });
+    const kindOf = a => a.indexOf('location') >= 0 ? 'Place' : a.indexOf('item') >= 0 ? 'Item' : a.indexOf('type') >= 0 ? 'Box type' : 'Box';
     switch (h.action) {
-      case 'box_created': return 'set up box ' + boxWord(t) + (d.place ? ', kept at ' + d.place : '');
-      case 'box_moved': return 'moved box ' + boxWord(t) + ' from ' + (d.from || 'no place') + ' to ' + (d.to || 'no place');
-      case 'box_updated': return ch.name ? 'renamed box ' + t + ' from "' + ch.name[0] + '" to "' + ch.name[1] + '"' + (Object.keys(ch).length > 1 ? ' and changed ' + fields('name') : '') : 'changed ' + fields() + ' of box ' + boxWord(t);
-      case 'box_start_fresh': return 'started box ' + boxWord(t) + ' fresh (' + (d.items_moved_to_past || 0) + ' into past contents)';
-      case 'item_created': return 'added "' + nm + '" to box ' + boxWord(d.box_id);
-      case 'item_status': return 'marked "' + nm + '" as ' + (ch.status ? ch.status[1] : 'changed');
-      case 'item_moved': return 'moved "' + nm + '" to box ' + boxWord(d.box_id);
-      case 'item_back_in_box': return 'put "' + nm + '" back in box ' + boxWord(d.box_id);
-      case 'item_updated': return 'changed ' + fields() + ' of "' + nm + '"';
-      case 'place_created': return 'added the place ' + [d.room, d.shelf, d.row].filter(Boolean).join(' > ');
-      case 'place_updated': return 'changed the place ' + [d.room, d.shelf, d.row].filter(Boolean).join(' > ');
-      case 'type_created': return 'added the box type "' + nm + '"';
-      case 'type_updated': return 'changed the box type "' + nm + '"';
+      case 'box_created': return { cat: 'added', kind: 'Box', subject: boxWord(t), lines: d.place ? ['Kept at ' + d.place] : [] };
+      case 'item_created': return { cat: 'added', kind: 'Item', subject: nm, lines: ['In box ' + boxWord(d.box_id)] };
+      case 'place_created': return { cat: 'added', kind: 'Place', subject: [d.room, d.shelf, d.row].filter(Boolean).join(' > '), lines: [] };
+      case 'type_created': return { cat: 'added', kind: 'Box type', subject: nm, lines: [] };
+      case 'box_moved': return { cat: 'moved', kind: 'Box', subject: boxWord(t), lines: ['From: ' + (d.from || 'no place'), 'To: ' + (d.to || 'no place')] };
+      case 'item_moved': return { cat: 'moved', kind: 'Item', subject: nm, lines: ['From box: ' + (ch.box_id ? boxWord(ch.box_id[0]) : '?'), 'To box: ' + boxWord(d.box_id)] };
+      case 'item_status': {
+        const s = ch.status ? ch.status[1] : '';
+        return { cat: s === 'Taken out' ? 'out' : s === 'Used up' ? 'used' : 'back', kind: 'Item', subject: nm, lines: ['In box ' + boxWord(d.box_id)] };
+      }
+      case 'item_back_in_box': return { cat: 'back', kind: 'Item', subject: nm, lines: ['Put back in box ' + boxWord(d.box_id)] };
+      case 'box_updated': case 'item_updated': case 'place_updated': case 'type_updated':
+        return { cat: 'changed', kind: kindOf(h.action), subject: h.action === 'box_updated' ? boxWord(t) : (nm || [d.room, d.shelf, d.row].filter(Boolean).join(' > ') || t), lines: changeLines() };
+      case 'box_start_fresh': return { cat: 'fresh', kind: 'Box', subject: boxWord(t), lines: [(d.items_moved_to_past || 0) + ' thing' + (d.items_moved_to_past === 1 ? '' : 's') + ' went to past contents'] };
       default:
-        if (/^archived_/.test(h.action)) return 'hid ' + h.action.replace('archived_', '').replace('location', 'place') + ' "' + (nm || t) + '"';
-        if (/^restored_/.test(h.action)) return 'restored ' + h.action.replace('restored_', '').replace('location', 'place') + ' "' + (nm || t) + '"';
-        return h.action.replace(/_/g, ' ') + ' ' + t;
+        if (/^archived_/.test(h.action)) return { cat: 'hidden', kind: kindOf(h.action), subject: nm || t, lines: [] };
+        if (/^restored_/.test(h.action)) return { cat: 'restored', kind: kindOf(h.action), subject: nm || t, lines: [] };
+        return { cat: 'changed', kind: '', subject: t, lines: [h.action.replace(/_/g, ' ')] };
     }
   }
-  function when(iso) {
-    const d = new Date(iso); if (isNaN(d)) return String(iso || '');
-    return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  function timeOnly(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }); }
+  function dayLabel(iso) {
+    const d = new Date(iso); if (isNaN(d)) return 'Earlier';
+    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((day(new Date()) - day(d)) / 86400000);
+    if (diff === 0) return 'Today'; if (diff === 1) return 'Yesterday';
+    return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  function entryHTML(h, showDay) {
+    const x = describe(h), c = CATS[x.cat];
+    return '<div class="he c-' + x.cat + '"><div class="he-top"><span class="tag t-' + x.cat + '">' + esc(c.en) + '</span><span class="he-who"><b>' + esc(h.who) + '</b> · ' +
+      esc(showDay ? dayLabel(h.time) + ', ' + timeOnly(h.time) : timeOnly(h.time)) + '</span></div>' +
+      '<div class="he-main">' + (x.kind ? '<span class="he-kind">' + esc(x.kind) + '</span> ' : '') + '<b>' + esc(x.subject) + '</b></div>' +
+      x.lines.map(l => '<div class="he-line">' + esc(l) + '</div>').join('') + '</div>';
   }
 
   async function showHistory(hash) {
@@ -681,14 +714,33 @@
     const back = target ? (/^B/.test(target) ? '#/box/' + target : '#/item/' + target) : '#/more';
     const head = '<h1>History <span class="ta">வரலாறு</span></h1>' + (target ? '<p class="muted">' + esc(/^B/.test(target) ? boxWord(target) : ((findItem(target) || {}).name || target)) + '</p>' : '');
     page(head + '<p class="note center">Loading…</p>');
-    try {
-      const rows = await api('getHistory', { target: target, limit: 150 });
-      page(head + (rows.length ? rows.map(h => '<div class="hrow2"><div class="hwho"><b>' + esc(h.who) + '</b> <span class="when">' + esc(when(h.time)) + '</span></div><div>' + esc(describe(h)) + '</div></div>').join('') : '<section class="card"><p>Nothing has happened yet.</p></section>') +
-        btn('bBack', 'Back', 'ghost', 'பின்'));
-    } catch (e) {
+    let rows;
+    try { rows = await api('getHistory', { target: target, limit: 150 }); }
+    catch (e) {
       page(head + '<div class="err">' + esc(e.code === 'NETWORK' ? 'The history needs internet. Please try again when the internet is back.' : (e.message || 'Could not open the history.')) + '</div>' + btn('bBack', 'Back', 'ghost', 'பின்'));
+      return on('bBack', () => go(back));
     }
-    on('bBack', () => go(back));
+    let mode = recall('hf_histview') === 'kind' ? 'kind' : 'date';
+    const draw = () => {
+      let body = '';
+      if (!rows.length) body = '<section class="card"><p>Nothing has happened yet.</p></section>';
+      else if (mode === 'date') {
+        let last = '';
+        rows.forEach(h => { const dl = dayLabel(h.time); if (dl !== last) { body += '<h2 class="dayh">' + esc(dl) + '</h2>'; last = dl; } body += entryHTML(h, false); });
+      } else {
+        Object.keys(CATS).forEach(k => {
+          const list = rows.filter(h => describe(h).cat === k); if (!list.length) return;
+          body += '<details class="kind k-' + k + '"' + (rows.length <= 12 ? ' open' : '') + '><summary><span class="tag t-' + k + '">' + esc(CATS[k].en) + '</span> <span class="ta">' + esc(CATS[k].ta) + '</span> <span class="cnt">' + list.length + '</span></summary>' +
+            list.map(h => entryHTML(h, true)).join('') + '</details>';
+        });
+      }
+      page(head + '<div class="seg row2"><button class="segb' + (mode === 'date' ? ' sel' : '') + '" data-m="date">By date<span class="ta">தேதிப்படி</span></button>' +
+        '<button class="segb' + (mode === 'kind' ? ' sel' : '') + '" data-m="kind">By kind<span class="ta">வகைப்படி</span></button></div>' + body +
+        (rows.length >= 150 ? '<p class="note center">Showing the latest 150 changes.</p>' : '') + btn('bBack', 'Back', 'ghost', 'பின்'));
+      view.querySelectorAll('[data-m]').forEach(b => { b.onclick = () => { mode = b.getAttribute('data-m'); keep('hf_histview', mode); draw(); }; });
+      on('bBack', () => go(back));
+    };
+    draw();
   }
 
   /* ---------- Search ---------- */
