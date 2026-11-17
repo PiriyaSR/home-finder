@@ -74,3 +74,32 @@ button.big.ghost .ta{color:#8a4b00}
 header .ta{color:#ffe9b8}
 .no-ta .ta{display:none!important}
 .card .ta,.kv b .ta{color:#8a4b00}
+
+/* scan */
+.camwrap{margin:0 0 12px}
+.camwrap video{display:block;width:100%;max-height:55vh;object-fit:cover;border-radius:12px;background:#000;border:4px solid var(--tape)}
+.seg.row2{flex-direction:row;flex-wrap:wrap}
+.seg.row2 .segb{flex:1 1 40%;min-height:58px;font-size:1.05rem}
+
+/* labels: an A4 sheet is 210 x 297 mm */
+#sheets{margin-top:10px}
+.sheetwrap{margin:0 auto 14px;overflow:hidden;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.3)}
+.sheet{width:210mm;height:297mm;padding:8mm;box-sizing:border-box;display:grid;background:#fff;color:#000;transform-origin:top left}
+.lcell{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border:.3mm dashed #777;overflow:hidden;padding:2mm;min-width:0;min-height:0}
+.lcell.blank{border-color:transparent}
+.lqr svg{display:block;width:100%;height:100%}
+.lcode{font-weight:800;letter-spacing:.06em;line-height:1.1;margin-top:1mm}
+.lsub{font-size:11pt;margin-top:1mm}
+.nm{font-size:11pt;margin-top:3mm;width:90%;display:flex;align-items:flex-end;gap:2mm}
+.ln{flex:1;border-bottom:.3mm solid #000;height:1em}
+@media print{
+  @page{size:A4;margin:0}
+  header,.noprint,button.link{display:none!important}
+  html,body{background:#fff!important;font-size:16px!important}
+  main{max-width:none!important;padding:0!important;margin:0!important}
+  #view>h1{display:none}
+  #sheets{margin:0}
+  .sheetwrap{width:210mm!important;height:297mm!important;margin:0!important;box-shadow:none;break-after:page;page-break-after:always;overflow:hidden}
+  .sheet{transform:none!important}
+  .sheetwrap:last-child{break-after:auto;page-break-after:auto}
+}

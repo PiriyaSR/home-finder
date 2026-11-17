@@ -20,6 +20,7 @@
     document.documentElement.classList.toggle('no-ta', p.tamil === '0');
   }
   function setPref(k, v) { const p = prefs(); p[k] = v; keep('hf_prefs', JSON.stringify(p)); applyPrefs(); }
+  const SITE = 'https://piriyasr.github.io/home-finder/';
   const ta = t => t ? '<span class="ta">' + esc(t) + '</span>' : '';
 
   function normId(raw) {
@@ -158,7 +159,7 @@
     }
   }
 
-  const FORM_ROUTE = /^#\/(setup|edit|move|additem|edititem|placeform|typeform|newbox|search)/i;
+  const FORM_ROUTE = /^#\/(setup|edit|move|additem|edititem|placeform|typeform|newbox|search|scan|labels|settings)/i;
   // Quietly fetch the newest list. The screen is redrawn only if something really changed.
   async function bgRefresh() {
     const v = state.ver;
@@ -374,6 +375,170 @@
     on('bBack', () => go('#/'));
   }
 
+
+  /* ---------- Scan a QR sticker with the camera ---------- */
+  let cam = null;
+  function stopCamera() {
+    if (!cam) return;
+    clearInterval(cam.timer);
+    if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
+    cam = null;
+  }
+  function labelTarget(text) {
+    const m = String(text || '').match(/#\/(box|place)\/([A-Za-z0-9]+)/i);
+    if (!m) return null;
+    if (m[1].toLowerCase() === 'box') { const id = normId(m[2]); return id ? '#/box/' + id : null; }
+    return /^L\d+$/i.test(m[2]) ? '#/place/' + m[2].toUpperCase() : null;
+  }
+
+  async function showScan() {
+    page('<h1>Scan a box <span class="ta">ஸ்கேன்</span></h1>' +
+      '<div class="camwrap"><video id="vid" playsinline muted autoplay></video></div>' +
+      '<p id="scanNote" class="note">Point the camera at the QR sticker. <span class="ta">QR ஸ்டிக்கரை நோக்கிப் பிடிக்கவும்.</span></p>' +
+      '<section class="card"><b>Or type the box number <span class="ta">அல்லது எண்ணை தட்டச்சு செய்</span></b>' +
+      '<input id="scanNum" inputmode="text" maxlength="6" autocomplete="off" placeholder="B004"></section>' +
+      btn('bGoNum', 'Open this box', 'primary', 'பெட்டியைத் திற') + btn('bBack', 'Back to start', 'ghost', 'முகப்புக்குத் திரும்பு'));
+    const note = t => { const n = $('scanNote'); if (n) n.textContent = t; };
+    const openNum = () => {
+      const raw = $('scanNum').value.trim();
+      const id = normId(/^\d+$/.test(raw) ? 'B' + raw : raw);
+      if (!id) return note('That does not look like a box number. Try 4 or B004.');
+      go('#/box/' + id);
+    };
+    on('bGoNum', openNum); on('bBack', () => go('#/'));
+    $('scanNum').onkeydown = e => { if (e.key === 'Enter') openNum(); };
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return note('The camera cannot be used here. Please type the box number below.');
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+    catch (e) {
+      return note(e && e.name === 'NotAllowedError'
+        ? 'The camera is blocked. Tap the lock icon next to the address, choose Permissions, and allow the Camera. Or type the box number below.'
+        : 'The camera could not be started. Please type the box number below.');
+    }
+    if (!$('vid')) { stream.getTracks().forEach(t => t.stop()); return; }   // the person already left this screen
+    stopCamera();
+    const vid = $('vid'); vid.srcObject = stream;
+    try { await vid.play(); } catch (e) {}
+    let det = null;
+    try { if ('BarcodeDetector' in window) det = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) {}
+    const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+    let busyNow = false, lastText = '', lastAt = 0;
+    cam = { stream: stream, timer: setInterval(async () => {
+      if (busyNow || vid.readyState < 2 || !vid.videoWidth) return;
+      busyNow = true;
+      try {
+        let text = '';
+        if (det) { try { const r = await det.detect(vid); if (r.length) text = r[0].rawValue; } catch (e) {} }
+        if (!text && window.jsQR) {
+          const sc = Math.min(1, 640 / vid.videoWidth); cv.width = Math.round(vid.videoWidth * sc); cv.height = Math.round(vid.videoHeight * sc);
+          cx.drawImage(vid, 0, 0, cv.width, cv.height);
+          const c = jsQR(cx.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height, { inversionAttempts: 'dontInvert' });
+          if (c) text = c.data;
+        }
+        if (text) {
+          const target = labelTarget(text);
+          if (target) { stopCamera(); try { navigator.vibrate && navigator.vibrate(80); } catch (e) {} go(target); }
+          else if (text !== lastText || Date.now() - lastAt > 3000) { lastText = text; lastAt = Date.now(); note('That QR code is not one of our labels. Try another sticker.'); }
+        }
+      } catch (e) {}
+      busyNow = false;
+    }, 300) };
+  }
+
+  /* ---------- QR labels to print ---------- */
+  const LAYOUTS = {
+    4:  { cols: 2, rows: 2, qr: 80, code: 36, word: 'Big' },
+    8:  { cols: 2, rows: 4, qr: 48, code: 26, word: 'Medium' },
+    12: { cols: 3, rows: 4, qr: 42, code: 22, word: 'Small' }
+  };
+  const lab_ = { kind: 'box', layout: 8, nums: '', start: 1 };
+
+  function qrSvg(text) {
+    const q = qrcode(0, 'M'); q.addData(text); q.make();
+    return q.createSvgTag({ cellSize: 4, margin: 16, scalable: true });
+  }
+  function idFor(kind, n) { return (kind === 'place' ? 'L' : 'B') + ('000' + n).slice(-Math.max(3, String(n).length)); }
+  function numOf(id) { return parseInt(String(id).slice(1), 10) || 0; }
+  // "5-12" or "4,7,9" -> [5..12] or [4,7,9]
+  function parseNums(str) {
+    const out = [];
+    String(str || '').toUpperCase().replace(/[BL]/g, '').split(/[,;\s]+/).filter(Boolean).forEach(tok => {
+      const m = tok.match(/^(\d{1,4})(?:-(\d{1,4}))?$/);
+      if (!m) { out.bad = true; return; }
+      const a = Number(m[1]), b = m[2] ? Number(m[2]) : a;
+      if (a < 1 || b < a || b - a > 119) { out.bad = true; return; }
+      for (let n = a; n <= b; n++) if (out.indexOf(n) === -1) out.push(n);
+    });
+    return out;
+  }
+  function defaultNums(kind, size) {
+    if (kind === 'place') { const ns = places().map(l => numOf(l.loc_id)).filter(Boolean).sort((a, b) => a - b); return ns.join(', '); }
+    const mx = state.data.boxes.reduce((m, b) => Math.max(m, numOf(b.box_id)), 0);
+    return (mx + 1) + '-' + (mx + size);
+  }
+  function labelCell(id, kind, L) {
+    if (!id) return '<div class="lcell blank"></div>';
+    const url = SITE + '#/' + (kind === 'place' ? 'place' : 'box') + '/' + id;
+    const sub = kind === 'place' ? '<div class="lsub">' + esc(locLabel(id)) + '</div>' : '<div class="nm">Name: <span class="ln"></span></div>';
+    return '<div class="lcell"><div class="lqr" style="width:' + L.qr + 'mm;height:' + L.qr + 'mm">' + qrSvg(url) + '</div>' +
+      '<div class="lcode" style="font-size:' + L.code + 'pt">' + esc(id) + '</div>' + sub + '</div>';
+  }
+  function sheetsHTML(ids, kind, layout, start) {
+    const L = LAYOUTS[layout], per = L.cols * L.rows;
+    const cells = [];
+    for (let i = 1; i < start; i++) cells.push(null);
+    ids.forEach(id => cells.push(id));
+    let h = '';
+    for (let i = 0; i < cells.length; i += per) {
+      const chunk = cells.slice(i, i + per); while (chunk.length < per) chunk.push(null);
+      h += '<div class="sheetwrap"><div class="sheet" style="grid-template-columns:repeat(' + L.cols + ',1fr);grid-template-rows:repeat(' + L.rows + ',1fr)">' +
+        chunk.map(id => labelCell(id, kind, L)).join('') + '</div></div>';
+    }
+    return { html: h, sheets: Math.ceil(cells.length / per) };
+  }
+
+  function showLabels(hash) {
+    const qm = (hash || '').match(/\?(.*)$/);
+    if (qm) {
+      const q = new URLSearchParams(qm[1]);
+      lab_.kind = q.get('kind') === 'place' ? 'place' : 'box';
+      lab_.nums = String(q.get('ids') || '').replace(/[BL]0*/gi, '');
+      lab_.start = Number(q.get('start')) || 1;
+    } else if (!lab_.nums) lab_.nums = defaultNums(lab_.kind, LAYOUTS[lab_.layout].cols * LAYOUTS[lab_.layout].rows);
+    const segs = (items, cur, attr) => '<div class="seg row2">' + items.map(x => '<button class="segb' + (String(cur) === String(x[0]) ? ' sel' : '') + '" data-' + attr + '="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
+    page('<h1>Print labels <span class="ta">லேபிள்கள்</span></h1><div class="noprint">' +
+      '<h2>What for? <span class="ta">எதற்கு?</span></h2>' + segs([['box', 'Boxes'], ['place', 'Shelves / places']], lab_.kind, 'kind') +
+      lab('lNums', 'Which numbers? (for example 5-12 or 4,7,9)', 'எந்த எண்கள்?') + '<input id="lNums" inputmode="text" autocomplete="off" value="' + esc(lab_.nums) + '">' +
+      '<h2>Labels on each page <span class="ta">ஒரு பக்கத்தில்</span></h2>' + segs(Object.keys(LAYOUTS).map(k => [k, k + ' (' + LAYOUTS[k].word + ')']), lab_.layout, 'layout') +
+      lab('lStart', 'Start at spot number (to reuse a half-used page)', 'தொடங்கும் இடம்') + '<input id="lStart" inputmode="numeric" maxlength="2" value="' + esc(lab_.start) + '">' +
+      '<p class="hint">Spot 1 is the top left. Spots count along each row.</p>' +
+      '<p id="lInfo" class="note"></p>' +
+      btn('bPrint', 'Print or save as PDF', 'primary', 'அச்சிடு') + btn('bBack', 'Back to start', 'ghost', 'முகப்புக்குத் திரும்பு') +
+      '<p class="hint">When printing, choose paper size A4 and Scale 100% (not "Fit to page"). Cut along the dashed lines.</p></div>' +
+      '<div id="sheets"></div>');
+    const draw = () => {
+      lab_.nums = $('lNums').value;
+      const L = LAYOUTS[lab_.layout], per = L.cols * L.rows;
+      lab_.start = Math.max(1, Math.min(per, Number($('lStart').value) || 1));
+      const ns = parseNums(lab_.nums);
+      const info = $('lInfo');
+      if (ns.bad || !ns.length) { info.textContent = 'Please type numbers like 5-12 or 4,7,9.'; $('sheets').innerHTML = ''; return; }
+      if (ns.length > 120) { info.textContent = 'That is too many at once. Please print up to 120.'; $('sheets').innerHTML = ''; return; }
+      const ids = ns.map(n => idFor(lab_.kind, n));
+      const r = sheetsHTML(ids, lab_.kind, lab_.layout, lab_.start);
+      info.textContent = ids.length + (ids.length > 1 ? ' labels on ' : ' label on ') + r.sheets + ' page' + (r.sheets > 1 ? 's' : '') + '.';
+      $('sheets').innerHTML = r.html;
+      const w = Math.min((view.clientWidth || 392) - 32, 794), sc = w / 794;
+      view.querySelectorAll('.sheetwrap').forEach(sw => { sw.style.width = (794 * sc) + 'px'; sw.style.height = (1123 * sc) + 'px'; sw.firstChild.style.transform = 'scale(' + sc + ')'; });
+    };
+    view.querySelectorAll('[data-kind]').forEach(b => { b.onclick = () => { lab_.kind = b.getAttribute('data-kind'); lab_.nums = defaultNums(lab_.kind, LAYOUTS[lab_.layout].cols * LAYOUTS[lab_.layout].rows); lab_.start = 1; showLabels(''); }; });
+    view.querySelectorAll('[data-layout]').forEach(b => { b.onclick = () => { lab_.layout = Number(b.getAttribute('data-layout')); lab_.nums = $('lNums').value; showLabels(''); }; });
+    $('lNums').oninput = draw; $('lStart').oninput = draw;
+    on('bPrint', () => window.print()); on('bBack', () => go('#/'));
+    draw();
+  }
+
   /* ---------- Home ---------- */
   function showHome() {
     const boxes = boxesAll().length;
@@ -383,10 +548,12 @@
       btn('bSearch', 'Search', 'primary', 'தேடு') + btn('bScan', 'Scan a box', 'tape', 'பெட்டியை ஸ்கேன் செய்') +
       btn('bBoxes', 'All boxes', 'ghost', 'எல்லா பெட்டிகள்') + btn('bNew', 'Add a new box', 'ghost', 'புதிய பெட்டி சேர்') +
       btn('bPlaces', 'Places', 'ghost', 'இடங்கள்') + btn('bTypes', 'Box types', 'ghost', 'பெட்டி வகைகள்') +
+      btn('bLabels', 'Print labels', 'ghost', 'லேபிள்களை அச்சிடு') +
       (state.installEvt ? btn('bInstall', 'Install this app', 'ghost') : '') +
-      '<p class="note center" id="soon"></p>');
+      '');
     on('bSearch', () => go('#/search'));
-    on('bScan', () => { $('soon').textContent = 'The scan button is being added soon.'; });
+    on('bScan', () => go('#/scan'));
+    on('bLabels', () => go('#/labels'));
     on('bBoxes', () => go('#/boxes')); on('bNew', () => go('#/newbox'));
     on('bPlaces', () => go('#/places')); on('bTypes', () => go('#/types'));
     on('bInstall', () => { state.installEvt.prompt(); state.installEvt = null; });
@@ -547,7 +714,9 @@
       (items.length ? items.map(itemRow).join('') : '<p class="note">Nothing saved inside yet. <span class="ta">இன்னும் எதுவும் இல்லை.</span></p>') +
       btn('bAdd', 'Add an item', 'primary', 'பொருள் சேர்') +
       btn('bMove', 'Move this box', 'tape', 'பெட்டியை நகர்த்து') + btn('bEdit', 'Change details', 'ghost', 'விவரங்களை மாற்று') +
+      btn('bPrint', 'Print this label again', 'ghost', 'லேபிளை மீண்டும் அச்சிடு') +
       btn('bBack', 'Back to start', 'ghost', 'முகப்புக்குத் திரும்பு'));
+    on('bPrint', () => go('#/labels?kind=box&ids=' + id));
     on('bAdd', () => go('#/additem/' + id));
     on('bMove', () => go('#/move/' + id)); on('bEdit', () => go('#/edit/' + id)); on('bBack', () => go('#/'));
     on('bPhoto', () => openBig(box.cover_photo_id));
@@ -752,8 +921,9 @@
       '<h2>Boxes here <span class="ta">இங்குள்ள பெட்டிகள்</span></h2>' + (here.length ? '' : '<p class="note">No boxes are kept here.</p>') +
       here.map(b => '<button class="row" data-id="' + esc(b.box_id) + '">' + thumbImg(b.cover_photo_id) +
         '<span class="rt"><b>' + esc(b.name) + '</b><span class="id">' + esc(b.box_id) + '</span></span></button>').join('') +
-      btn('bEdit', 'Change this place', 'ghost', 'இடத்தை மாற்று') + btn('bBack', 'Back to places', 'ghost', 'இடங்களுக்குத் திரும்பு'));
+      btn('bEdit', 'Change this place', 'ghost', 'இடத்தை மாற்று') + btn('bPrint', 'Print a label for this place', 'ghost', 'இந்த இடத்துக்கான லேபிள்') + btn('bBack', 'Back to places', 'ghost', 'இடங்களுக்குத் திரும்பு'));
     view.querySelectorAll('.row').forEach(r => { r.onclick = () => go('#/box/' + r.getAttribute('data-id')); });
+    on('bPrint', () => go('#/labels?kind=place&ids=' + id));
     on('bEdit', () => go('#/placeform/' + id)); on('bBack', () => go('#/places'));
     needThumbs(here.map(b => b.cover_photo_id));
   }
@@ -823,6 +993,7 @@
   /* ---------- routing ---------- */
   function route() {
     const lb = $('lb'); if (lb) lb.remove();
+    stopCamera();
     const h = location.hash || '#/';
     const d = s => { try { return decodeURIComponent(s); } catch (e) { return s; } };
     let m;
@@ -833,6 +1004,8 @@
     if ((m = h.match(/^#\/additem\/([^/?]+)/i))) return showItemForm(d(m[1]), 'new');
     if ((m = h.match(/^#\/edititem\/([^/?]+)/i))) return showItemForm(d(m[1]), 'edit');
     if ((m = h.match(/^#\/item\/([^/?]+)/i))) return showItem(d(m[1]));
+    if (/^#\/scan/i.test(h)) return showScan();
+    if (/^#\/labels/i.test(h)) { if (h.indexOf('?') < 0) { lab_.nums = ''; lab_.start = 1; } return showLabels(h); }
     if (/^#\/settings/i.test(h)) return showSettings();
     if (/^#\/search/i.test(h)) return showSearch();
     if (/^#\/boxes/i.test(h)) return showBoxes();
