@@ -552,12 +552,20 @@
     on('bBoxes', () => go('#/boxes')); on('bNew', () => go('#/newbox')); on('bMore', () => go('#/more'));
   }
 
+  function isStandalone() { return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }
+  function installHelp() {
+    if (isStandalone()) return '<section class="card"><p><b>This is the installed app. &#10003;</b> <span class="ta">இது நிறுவப்பட்ட செயலி.</span></p></section>';
+    return '<section class="card"><p><b>Install on this phone</b> <span class="ta">இந்த போனில் நிறுவ</span></p>' +
+      '<p class="note">Open this page in Chrome. Tap the three dots (top right). Tap <b>Install app</b> (not &ldquo;Add to Home screen&rdquo;). ' +
+      'If you only see &ldquo;Add to Home screen&rdquo;, wait a minute on this page, close Chrome fully, and open the page again.</p></section>';
+  }
+
   function showMore() {
     page('<h1>More <span class="ta">மேலும்</span></h1>' +
       btn('bPlaces', 'Places', 'ghost', 'இடங்கள்') + btn('bTypes', 'Box types', 'ghost', 'பெட்டி வகைகள்') +
       btn('bLabels', 'Print labels', 'ghost', 'லேபிள்களை அச்சிடு') + btn('bHistory', 'History', 'ghost', 'வரலாறு') +
       btn('bHidden', 'Hidden things', 'ghost', 'மறைத்தவை') + btn('bSettings2', 'Settings', 'ghost', 'அமைப்புகள்') +
-      (state.installEvt ? btn('bInstall', 'Install this app', 'tape', 'இந்த செயலியை நிறுவு') : '') +
+      (state.installEvt ? btn('bInstall', 'Install this app', 'tape', 'இந்த செயலியை நிறுவு') : installHelp()) +
       btn('bBack', 'Back to start', 'primary', 'முகப்புக்குத் திரும்பு'));
     on('bPlaces', () => go('#/places')); on('bTypes', () => go('#/types')); on('bLabels', () => go('#/labels'));
     on('bHistory', () => go('#/history')); on('bHidden', () => go('#/hidden')); on('bSettings2', () => go('#/settings'));
