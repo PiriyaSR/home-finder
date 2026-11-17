@@ -692,6 +692,21 @@
         return { cat: 'changed', kind: '', subject: t, lines: [h.action.replace(/_/g, ' ')] };
     }
   }
+  // Which box (and so which place) a history row is about. Places and box types have no box.
+  function rowBox(h) {
+    let d = {}; try { d = JSON.parse(h.details || '{}') || {}; } catch (e) {}
+    if (/^B/.test(h.target)) return h.target;
+    return d.box_id && /^B/.test(d.box_id) ? d.box_id : '';
+  }
+  function rowPlace(h) {
+    if (/^L/.test(h.target)) return h.target;
+    const b = rowBox(h), box = b && findBox(b);
+    return box ? box.loc_id : '';
+  }
+  function rowPath(h) {
+    const loc = rowPlace(h), l = loc && state.data.locations.find(x => x.loc_id === loc);
+    return { room: l ? l.room : '', shelf: l ? l.shelf : '', box: rowBox(h) };
+  }
   function timeOnly(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }); }
   function dayLabel(iso) {
     const d = new Date(iso); if (isNaN(d)) return 'Earlier';
@@ -720,13 +735,46 @@
       page(head + '<div class="err">' + esc(e.code === 'NETWORK' ? 'The history needs internet. Please try again when the internet is back.' : (e.message || 'Could not open the history.')) + '</div>' + btn('bBack', 'Back', 'ghost', 'பின்'));
       return on('bBack', () => go(back));
     }
-    let mode = recall('hf_histview') === 'kind' ? 'kind' : 'date';
+    const MODES = [['date', 'By date', 'தேதிப்படி'], ['kind', 'By kind', 'வகைப்படி'], ['person', 'By person', 'நபர்வாரி'], ['room', 'By room', 'அறைவாரி']]
+      .filter(m => !target || m[0] !== 'room');
+    let mode = recall('hf_histview'); if (!MODES.some(m => m[0] === mode)) mode = 'date';
     const draw = () => {
       let body = '';
       if (!rows.length) body = '<section class="card"><p>Nothing has happened yet.</p></section>';
       else if (mode === 'date') {
         let last = '';
         rows.forEach(h => { const dl = dayLabel(h.time); if (dl !== last) { body += '<h2 class="dayh">' + esc(dl) + '</h2>'; last = dl; } body += entryHTML(h, false); });
+      } else if (mode === 'person') {
+        const groups = {}, order = [];
+        rows.forEach(h => { if (!groups[h.who]) { groups[h.who] = []; order.push(h.who); } groups[h.who].push(h); });
+        order.forEach(w => {
+          body += '<details class="kind"' + (order.length <= 2 || rows.length <= 12 ? ' open' : '') + '><summary><span class="gtitle">' + esc(w) + '</span> <span class="cnt">' + groups[w].length + '</span></summary>' +
+            groups[w].map(h => entryHTML(h, true)).join('') + '</details>';
+        });
+      } else if (mode === 'room') {
+        const tree = [];
+        const find = (arr, key, mk) => { let x = arr.find(y => y.key === key); if (!x) { x = mk(); x.key = key; arr.push(x); } return x; };
+        rows.forEach(h => {
+          const p = rowPath(h), none = !p.room;
+          const R = find(tree, none ? '~' : norm(p.room), () => ({ title: none ? 'No place (box types and others)' : p.room, kids: [], n: 0, none: none, list: [] }));
+          R.n++;
+          if (none) { R.list.push(h); return; }
+          const S = find(R.kids, norm(p.shelf) || '-', () => ({ title: p.shelf || '(no shelf)', kids: [], n: 0 })); S.n++;
+          const B = find(S.kids, p.box || '-', () => ({ title: p.box ? boxWord(p.box) : 'The place itself', list: [], n: 0 })); B.n++; B.list.push(h);
+        });
+        tree.sort((a, b) => (a.none ? 1 : 0) - (b.none ? 1 : 0));
+        const op = rows.length <= 12 ? ' open' : '';
+        const sum = (t, n) => '<summary><span class="gtitle">' + esc(t) + '</span> <span class="cnt">' + n + '</span></summary>';
+        tree.forEach(R => {
+          body += '<details class="kind l1"' + op + '>' + sum(R.title, R.n);
+          if (R.none) body += R.list.map(h => entryHTML(h, true)).join('');
+          else R.kids.forEach(S => {
+            body += '<details class="kind l2"' + op + '>' + sum(S.title, S.n);
+            S.kids.forEach(B => { body += '<details class="kind l3"' + op + '>' + sum(B.title, B.n) + B.list.map(h => entryHTML(h, true)).join('') + '</details>'; });
+            body += '</details>';
+          });
+          body += '</details>';
+        });
       } else {
         Object.keys(CATS).forEach(k => {
           const list = rows.filter(h => describe(h).cat === k); if (!list.length) return;
@@ -734,8 +782,7 @@
             list.map(h => entryHTML(h, true)).join('') + '</details>';
         });
       }
-      page(head + '<div class="seg row2"><button class="segb' + (mode === 'date' ? ' sel' : '') + '" data-m="date">By date<span class="ta">தேதிப்படி</span></button>' +
-        '<button class="segb' + (mode === 'kind' ? ' sel' : '') + '" data-m="kind">By kind<span class="ta">வகைப்படி</span></button></div>' + body +
+      page(head + '<div class="seg row2">' + MODES.map(m => '<button class="segb' + (mode === m[0] ? ' sel' : '') + '" data-m="' + m[0] + '">' + m[1] + '<span class="ta">' + m[2] + '</span></button>').join('') + '</div>' + body +
         (rows.length >= 150 ? '<p class="note center">Showing the latest 150 changes.</p>' : '') + btn('bBack', 'Back', 'ghost', 'பின்'));
       view.querySelectorAll('[data-m]').forEach(b => { b.onclick = () => { mode = b.getAttribute('data-m'); keep('hf_histview', mode); draw(); }; });
       on('bBack', () => go(back));

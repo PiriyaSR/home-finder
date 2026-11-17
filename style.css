@@ -130,3 +130,13 @@ details.kind>summary::after{content:'▸';margin-left:auto;font-size:1.4rem;colo
 details.kind[open]>summary::after{content:'▾'}
 details.kind[open]>summary{margin-bottom:10px}
 .cnt{font-weight:800;background:var(--tape);border-radius:20px;padding:0 12px;min-width:32px;text-align:center}
+
+.gtitle{display:flex;flex-direction:column;font-weight:800;font-size:1.15rem;min-width:0}
+.gtitle .sub{font-weight:400;font-size:.95rem;color:var(--muted)}
+details.kind>summary .cnt{margin-left:auto}
+details.kind>summary::after{margin-left:6px}
+.seg.row2 .segb{flex:1 1 30%}
+
+details.kind details.kind{margin-left:12px;border-left:4px solid var(--tape);padding-left:8px}
+details.kind.l2>summary{min-height:52px;font-size:1.02rem}
+details.kind.l3>summary{min-height:46px;font-size:.98rem;background:#f7fafb}
