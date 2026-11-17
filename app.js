@@ -159,7 +159,7 @@
     }
   }
 
-  const FORM_ROUTE = /^#\/(setup|edit|move|additem|edititem|placeform|typeform|newbox|search|scan|labels|settings)/i;
+  const FORM_ROUTE = /^#\/(setup|edit|move|additem|edititem|placeform|typeform|newbox|search|scan|labels|settings|history)/i;
   // Quietly fetch the newest list. The screen is redrawn only if something really changed.
   async function bgRefresh() {
     const v = state.ver;
@@ -547,16 +547,148 @@
       '<p class="muted">' + boxes + ' boxes and ' + items + ' items saved so far.</p></section>' +
       btn('bSearch', 'Search', 'primary', 'தேடு') + btn('bScan', 'Scan a box', 'tape', 'பெட்டியை ஸ்கேன் செய்') +
       btn('bBoxes', 'All boxes', 'ghost', 'எல்லா பெட்டிகள்') + btn('bNew', 'Add a new box', 'ghost', 'புதிய பெட்டி சேர்') +
+      btn('bMore', 'More', 'ghost', 'மேலும்'));
+    on('bSearch', () => go('#/search')); on('bScan', () => go('#/scan'));
+    on('bBoxes', () => go('#/boxes')); on('bNew', () => go('#/newbox')); on('bMore', () => go('#/more'));
+  }
+
+  function showMore() {
+    page('<h1>More <span class="ta">மேலும்</span></h1>' +
       btn('bPlaces', 'Places', 'ghost', 'இடங்கள்') + btn('bTypes', 'Box types', 'ghost', 'பெட்டி வகைகள்') +
-      btn('bLabels', 'Print labels', 'ghost', 'லேபிள்களை அச்சிடு') +
-      (state.installEvt ? btn('bInstall', 'Install this app', 'ghost') : '') +
-      '');
-    on('bSearch', () => go('#/search'));
-    on('bScan', () => go('#/scan'));
-    on('bLabels', () => go('#/labels'));
-    on('bBoxes', () => go('#/boxes')); on('bNew', () => go('#/newbox'));
-    on('bPlaces', () => go('#/places')); on('bTypes', () => go('#/types'));
-    on('bInstall', () => { state.installEvt.prompt(); state.installEvt = null; });
+      btn('bLabels', 'Print labels', 'ghost', 'லேபிள்களை அச்சிடு') + btn('bHistory', 'History', 'ghost', 'வரலாறு') +
+      btn('bHidden', 'Hidden things', 'ghost', 'மறைத்தவை') + btn('bSettings2', 'Settings', 'ghost', 'அமைப்புகள்') +
+      (state.installEvt ? btn('bInstall', 'Install this app', 'tape', 'இந்த செயலியை நிறுவு') : '') +
+      btn('bBack', 'Back to start', 'primary', 'முகப்புக்குத் திரும்பு'));
+    on('bPlaces', () => go('#/places')); on('bTypes', () => go('#/types')); on('bLabels', () => go('#/labels'));
+    on('bHistory', () => go('#/history')); on('bHidden', () => go('#/hidden')); on('bSettings2', () => go('#/settings'));
+    on('bInstall', () => { state.installEvt.prompt(); state.installEvt = null; }); on('bBack', () => go('#/'));
+  }
+
+
+  /* ---------- Archive / restore, start fresh, past contents, history ---------- */
+  const KIND = { box: ['boxes', 'box_id'], item: ['items', 'item_id'], location: ['locations', 'loc_id'] };
+  async function setHidden(kind, id, hide) {
+    await api('setArchived', { kind: kind, id: id, archived: !!hide });
+    const rec = state.data[KIND[kind][0]].find(x => x[KIND[kind][1]] === id);
+    if (rec) rec.archived = hide ? '1' : '';
+    remember(); bgRefresh();
+  }
+  function confirmScreen(title, text, yesLabel, yesTa, yesFn, backHash) {
+    page('<section class="card"><h1>' + esc(title) + '</h1><p>' + esc(text) + '</p></section><div id="err" class="err" hidden></div>' +
+      btn('bYes', yesLabel, 'primary', yesTa) + btn('bNo', 'No, go back', 'ghost', 'இல்லை, திரும்பு'));
+    on('bNo', () => go(backHash));
+    on('bYes', async () => { busy('bYes', true); try { await yesFn(); } catch (e) { busy('bYes', false); showErr(e); } });
+  }
+
+  function confirmHideBox(id) {
+    const box = findBox(id); if (!box) return go('#/');
+    confirmScreen('Hide box ' + box.name + '?', 'The box and the things inside it will not show in lists or search. Nothing is deleted, and you can bring it back from More > Hidden things.',
+      'Yes, hide it', 'ஆம், மறை', async () => { await setHidden('box', id, true); state.flash = 'Hidden. You can restore it from Hidden things.'; go('#/boxes'); }, '#/box/' + id);
+  }
+  function confirmHideItem(id) {
+    const it = findItem(id); if (!it) return go('#/');
+    confirmScreen('Hide "' + it.name + '"?', 'It will not show in the box or in search. Nothing is deleted, and you can bring it back from More > Hidden things.',
+      'Yes, hide it', 'ஆம், மறை', async () => { await setHidden('item', id, true); state.flash = 'Hidden.'; go('#/box/' + it.box_id); }, '#/item/' + id);
+  }
+  function confirmHidePlace(id) {
+    const l = state.data.locations.find(x => x.loc_id === id); if (!l) return go('#/places');
+    if (countAt(id)) return showMessage('Boxes are still here', 'Move the boxes in ' + locLabel(id) + ' to another place first, then hide this place.', [{ label: 'Back', cls: 'ghost', ta: 'பின்', fn: () => go('#/place/' + id) }]);
+    confirmScreen('Hide the place ' + locLabel(id) + '?', 'It will not show in the list of places. You can bring it back from More > Hidden things.',
+      'Yes, hide it', 'ஆம், மறை', async () => { await setHidden('location', id, true); state.flash = 'Hidden.'; go('#/places'); }, '#/place/' + id);
+  }
+
+  function confirmFresh(id) {
+    const box = findBox(id); if (!box) return go('#/');
+    const n = currentItems(box).length;
+    confirmScreen('Start ' + box.name + ' fresh?', 'Use this when the box is being used for different things now. The ' + n + ' thing' + (n === 1 ? '' : 's') + ' inside will be kept as "past contents" and will not show in search. Nothing is deleted, and you can put them back.',
+      'Yes, start fresh', 'ஆம், புதிதாகத் தொடங்கு', async () => {
+        const r = await api('startFresh', { box_id: id });
+        box.gen = String(r.gen); box.status = 'Empty'; remember(); bgRefresh();
+        state.flash = 'The box is empty and ready for new things.'; go('#/box/' + id);
+      }, '#/box/' + id);
+  }
+
+  function pastItems(box) { return state.data.items.filter(i => i.box_id === box.box_id && !i.archived && Number(i.gen || 1) < Number(box.gen || 1)); }
+
+  function showPast(raw) {
+    const id = normId(raw), box = id && findBox(id); if (!box) return go('#/');
+    const past = pastItems(box);
+    const gens = Array.from(new Set(past.map(i => Number(i.gen || 1)))).sort((a, b) => b - a);
+    page('<section class="card"><div class="big-id">' + esc(id) + '</div><h1>' + esc(box.name) + '</h1><p class="muted">Past contents. These are not in the box now. <span class="ta">முன்பு இருந்தவை</span></p></section>' +
+      (gens.length ? gens.map(g => '<h2>Before fresh start ' + (Number(box.gen || 1) - g) + '</h2>' + past.filter(i => Number(i.gen || 1) === g).sort((a, b) => a.name.localeCompare(b.name)).map(itemRow).join('')).join('') : '<p class="note">Nothing here.</p>') +
+      btn('bBack', 'Back to the box', 'ghost', 'பெட்டிக்குத் திரும்பு'));
+    view.querySelectorAll('.row[data-item]').forEach(r => { r.onclick = () => go('#/item/' + r.getAttribute('data-item')); });
+    on('bBack', () => go('#/box/' + id));
+    needThumbs(past.map(i => i.photo_id));
+  }
+
+  function showHidden() {
+    const d = state.data;
+    const hb = d.boxes.filter(b => b.archived), hi = d.items.filter(i => i.archived), hl = d.locations.filter(l => l.archived);
+    const row = (kind, id, title, sub) => '<div class="hrow"><div class="rt"><b>' + esc(title) + '</b><span class="sub">' + esc(sub) + '</span></div><button class="smallbtn" data-kind="' + kind + '" data-id="' + esc(id) + '">Restore<span class="ta">மீட்டெடு</span></button></div>';
+    page('<h1>Hidden things <span class="ta">மறைத்தவை</span></h1><div id="err" class="err" hidden></div>' +
+      (hb.length || hi.length || hl.length ? '' : '<section class="card"><p>Nothing is hidden.</p></section>') +
+      (hb.length ? '<h2>Boxes</h2>' + hb.map(b => row('box', b.box_id, b.name + ' (' + b.box_id + ')', locLabel(b.loc_id))).join('') : '') +
+      (hi.length ? '<h2>Things</h2>' + hi.map(i => { const b = findBox(i.box_id); return row('item', i.item_id, i.name, 'In ' + (b ? b.name : i.box_id) + (b && b.archived ? ' (hidden box)' : '')); }).join('') : '') +
+      (hl.length ? '<h2>Places</h2>' + hl.map(l => row('location', l.loc_id, locLabel(l.loc_id), '')).join('') : '') +
+      btn('bBack', 'Back', 'ghost', 'பின்'));
+    on('bBack', () => go('#/more'));
+    view.querySelectorAll('.smallbtn').forEach(b => {
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await setHidden(b.getAttribute('data-kind'), b.getAttribute('data-id'), false); state.flash = 'Restored.'; showHidden(); }
+        catch (e) { b.disabled = false; showErr(e); }
+      };
+    });
+  }
+
+  /* ----- history ----- */
+  const FIELD_WORDS = { name: 'the name', looks_like: 'what it looks like', type_id: 'the type', owner: 'whose it is', notes: 'the notes', cover_photo_id: 'the picture', status: 'the status',
+    also_called: 'the other names', description: 'the details', qty: 'the number', photo_id: 'the picture', room: 'the room', shelf: 'the shelf', row: 'the row', note: 'the note', looks: 'what it looks like', loc_id: 'the place' };
+  function boxWord(id) { const b = findBox(id); return b ? b.name + ' (' + id + ')' : id; }
+  function describe(h) {
+    let d = {}; try { d = JSON.parse(h.details || '{}') || {}; } catch (e) {}
+    const t = h.target, nm = d.name || '', ch = d.changes || {};
+    const fields = skip => Object.keys(ch).filter(k => k !== skip).map(k => FIELD_WORDS[k] || k).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+    switch (h.action) {
+      case 'box_created': return 'set up box ' + boxWord(t) + (d.place ? ', kept at ' + d.place : '');
+      case 'box_moved': return 'moved box ' + boxWord(t) + ' from ' + (d.from || 'no place') + ' to ' + (d.to || 'no place');
+      case 'box_updated': return ch.name ? 'renamed box ' + t + ' from "' + ch.name[0] + '" to "' + ch.name[1] + '"' + (Object.keys(ch).length > 1 ? ' and changed ' + fields('name') : '') : 'changed ' + fields() + ' of box ' + boxWord(t);
+      case 'box_start_fresh': return 'started box ' + boxWord(t) + ' fresh (' + (d.items_moved_to_past || 0) + ' into past contents)';
+      case 'item_created': return 'added "' + nm + '" to box ' + boxWord(d.box_id);
+      case 'item_status': return 'marked "' + nm + '" as ' + (ch.status ? ch.status[1] : 'changed');
+      case 'item_moved': return 'moved "' + nm + '" to box ' + boxWord(d.box_id);
+      case 'item_back_in_box': return 'put "' + nm + '" back in box ' + boxWord(d.box_id);
+      case 'item_updated': return 'changed ' + fields() + ' of "' + nm + '"';
+      case 'place_created': return 'added the place ' + [d.room, d.shelf, d.row].filter(Boolean).join(' > ');
+      case 'place_updated': return 'changed the place ' + [d.room, d.shelf, d.row].filter(Boolean).join(' > ');
+      case 'type_created': return 'added the box type "' + nm + '"';
+      case 'type_updated': return 'changed the box type "' + nm + '"';
+      default:
+        if (/^archived_/.test(h.action)) return 'hid ' + h.action.replace('archived_', '').replace('location', 'place') + ' "' + (nm || t) + '"';
+        if (/^restored_/.test(h.action)) return 'restored ' + h.action.replace('restored_', '').replace('location', 'place') + ' "' + (nm || t) + '"';
+        return h.action.replace(/_/g, ' ') + ' ' + t;
+    }
+  }
+  function when(iso) {
+    const d = new Date(iso); if (isNaN(d)) return String(iso || '');
+    return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  }
+
+  async function showHistory(hash) {
+    const qm = (hash || '').match(/\?target=([^&]+)/);
+    const target = qm ? decodeURIComponent(qm[1]) : '';
+    const back = target ? (/^B/.test(target) ? '#/box/' + target : '#/item/' + target) : '#/more';
+    const head = '<h1>History <span class="ta">வரலாறு</span></h1>' + (target ? '<p class="muted">' + esc(/^B/.test(target) ? boxWord(target) : ((findItem(target) || {}).name || target)) + '</p>' : '');
+    page(head + '<p class="note center">Loading…</p>');
+    try {
+      const rows = await api('getHistory', { target: target, limit: 150 });
+      page(head + (rows.length ? rows.map(h => '<div class="hrow2"><div class="hwho"><b>' + esc(h.who) + '</b> <span class="when">' + esc(when(h.time)) + '</span></div><div>' + esc(describe(h)) + '</div></div>').join('') : '<section class="card"><p>Nothing has happened yet.</p></section>') +
+        btn('bBack', 'Back', 'ghost', 'பின்'));
+    } catch (e) {
+      page(head + '<div class="err">' + esc(e.code === 'NETWORK' ? 'The history needs internet. Please try again when the internet is back.' : (e.message || 'Could not open the history.')) + '</div>' + btn('bBack', 'Back', 'ghost', 'பின்'));
+    }
+    on('bBack', () => go(back));
   }
 
   /* ---------- Search ---------- */
@@ -715,7 +847,11 @@
       btn('bAdd', 'Add an item', 'primary', 'பொருள் சேர்') +
       btn('bMove', 'Move this box', 'tape', 'பெட்டியை நகர்த்து') + btn('bEdit', 'Change details', 'ghost', 'விவரங்களை மாற்று') +
       btn('bPrint', 'Print this label again', 'ghost', 'லேபிளை மீண்டும் அச்சிடு') +
+      (pastItems(box).length ? btn('bPast', 'Past contents (' + pastItems(box).length + ')', 'ghost', 'முன்பு இருந்தவை') : '') +
+      btn('bFresh', 'Start fresh (box is reused)', 'ghost', 'புதிதாகத் தொடங்கு') + btn('bHist', 'History of this box', 'ghost', 'வரலாறு') +
+      btn('bHide', 'Hide this box', 'ghost', 'பெட்டியை மறை') +
       btn('bBack', 'Back to start', 'ghost', 'முகப்புக்குத் திரும்பு'));
+    on('bPast', () => go('#/past/' + id)); on('bFresh', () => go('#/fresh/' + id)); on('bHist', () => go('#/history?target=' + id)); on('bHide', () => go('#/hide/' + id));
     on('bPrint', () => go('#/labels?kind=box&ids=' + id));
     on('bAdd', () => go('#/additem/' + id));
     on('bMove', () => go('#/move/' + id)); on('bEdit', () => go('#/edit/' + id)); on('bBack', () => go('#/'));
@@ -832,17 +968,27 @@
   function showItem(id) {
     const it = findItem(id), box = it && findBox(it.box_id);
     if (!it || !box) return go('#/');
+    const past = Number(it.gen || 1) < Number(box.gen || 1);
     page('<section class="card"><h1>' + esc(it.name) + (it.qty ? ' <span class="qty">× ' + esc(it.qty) + '</span>' : '') + '</h1>' +
       (it.photo_id ? '<button class="photo" id="bPhoto">' + thumbImg(it.photo_id, 'th big') + '<span class="note">Tap the picture to see it bigger</span></button>' : '') +
       (it.also_called ? '<div class="kv"><b>Also called <span class="ta">வேறு பெயர்கள்</span></b>' + esc(it.also_called) + '</div>' : '') +
       (it.description ? '<div class="kv"><b>Details <span class="ta">விவரம்</span></b>' + esc(it.description) + '</div>' : '') +
       '<div class="kv"><b>Kept in <span class="ta">எங்கே உள்ளது</span></b>' + esc(box.name) + ' (' + esc(box.box_id) + ')' +
       (locLabel(box.loc_id) ? '<br>' + esc(locLabel(box.loc_id)) : '') + '</div></section>' +
-      '<h2>Status <span class="ta">நிலை</span></h2><div class="seg">' +
-      Object.keys(STATUS).map(s => '<button class="segb' + ((it.status || 'In box') === s ? ' sel' : '') + '" data-s="' + esc(s) + '">' + esc(s) + '<span class="ta">' + esc(STATUS[s]) + '</span></button>').join('') + '</div>' +
+      (past ? '<p class="warn">This was in the box before it was started fresh. It is not counted as inside the box now.</p>' : '') +
+      (past ? '' : '<h2>Status <span class="ta">நிலை</span></h2><div class="seg">') +
+      (past ? '' : Object.keys(STATUS).map(s => '<button class="segb' + ((it.status || 'In box') === s ? ' sel' : '') + '" data-s="' + esc(s) + '">' + esc(s) + '<span class="ta">' + esc(STATUS[s]) + '</span></button>').join('') + '</div>') +
       '<div id="err" class="err" hidden></div>' +
-      btn('bBox', 'Open box ' + box.box_id, 'tape', 'பெட்டியைத் திற') + btn('bEdit', 'Change this item', 'ghost', 'மாற்று') + btn('bBack', 'Back to start', 'ghost', 'முகப்புக்குத் திரும்பு'));
+      (past ? btn('bBackIn', 'Put it back in the box', 'primary', 'மீண்டும் பெட்டியில் வை') : '') +
+      btn('bBox', 'Open box ' + box.box_id, 'tape', 'பெட்டியைத் திற') + btn('bEdit', 'Change this item', 'ghost', 'மாற்று') +
+      btn('bHist', 'History of this item', 'ghost', 'வரலாறு') + btn('bHide', 'Hide this item', 'ghost', 'மறை') + btn('bBack', 'Back to start', 'ghost', 'முகப்புக்குத் திரும்பு'));
     on('bBox', () => go('#/box/' + box.box_id)); on('bEdit', () => go('#/edititem/' + id)); on('bBack', () => go('#/'));
+    on('bHist', () => go('#/history?target=' + id)); on('bHide', () => go('#/hideitem/' + id));
+    on('bBackIn', async () => {
+      busy('bBackIn', true);
+      try { const r = await api('saveItem', { item_id: id, box_id: it.box_id, name: it.name, bring_back: true }); upsert(state.data.items, 'item_id', r.item); remember(); bgRefresh(); state.flash = 'It is back in the box.'; go('#/box/' + it.box_id); }
+      catch (e) { busy('bBackIn', false); showErr(e); }
+    });
     on('bPhoto', () => openBig(it.photo_id));
     view.querySelectorAll('.segb').forEach(b => {
       b.onclick = async () => {
@@ -921,7 +1067,8 @@
       '<h2>Boxes here <span class="ta">இங்குள்ள பெட்டிகள்</span></h2>' + (here.length ? '' : '<p class="note">No boxes are kept here.</p>') +
       here.map(b => '<button class="row" data-id="' + esc(b.box_id) + '">' + thumbImg(b.cover_photo_id) +
         '<span class="rt"><b>' + esc(b.name) + '</b><span class="id">' + esc(b.box_id) + '</span></span></button>').join('') +
-      btn('bEdit', 'Change this place', 'ghost', 'இடத்தை மாற்று') + btn('bPrint', 'Print a label for this place', 'ghost', 'இந்த இடத்துக்கான லேபிள்') + btn('bBack', 'Back to places', 'ghost', 'இடங்களுக்குத் திரும்பு'));
+      btn('bEdit', 'Change this place', 'ghost', 'இடத்தை மாற்று') + btn('bPrint', 'Print a label for this place', 'ghost', 'இந்த இடத்துக்கான லேபிள்') + btn('bHide', 'Hide this place', 'ghost', 'இடத்தை மறை') + btn('bBack', 'Back to places', 'ghost', 'இடங்களுக்குத் திரும்பு'));
+    on('bHide', () => go('#/hideplace/' + id));
     view.querySelectorAll('.row').forEach(r => { r.onclick = () => go('#/box/' + r.getAttribute('data-id')); });
     on('bPrint', () => go('#/labels?kind=place&ids=' + id));
     on('bEdit', () => go('#/placeform/' + id)); on('bBack', () => go('#/places'));
@@ -1004,6 +1151,14 @@
     if ((m = h.match(/^#\/additem\/([^/?]+)/i))) return showItemForm(d(m[1]), 'new');
     if ((m = h.match(/^#\/edititem\/([^/?]+)/i))) return showItemForm(d(m[1]), 'edit');
     if ((m = h.match(/^#\/item\/([^/?]+)/i))) return showItem(d(m[1]));
+    if ((m = h.match(/^#\/past\/([^/?]+)/i))) return showPast(d(m[1]));
+    if ((m = h.match(/^#\/fresh\/([^/?]+)/i))) return confirmFresh(normId(d(m[1])));
+    if ((m = h.match(/^#\/hide\/([^/?]+)/i))) return confirmHideBox(normId(d(m[1])));
+    if ((m = h.match(/^#\/hideitem\/([^/?]+)/i))) return confirmHideItem(d(m[1]));
+    if ((m = h.match(/^#\/hideplace\/([^/?]+)/i))) return confirmHidePlace(d(m[1]));
+    if (/^#\/hidden/i.test(h)) return showHidden();
+    if (/^#\/history/i.test(h)) return showHistory(h);
+    if (/^#\/more/i.test(h)) return showMore();
     if (/^#\/scan/i.test(h)) return showScan();
     if (/^#\/labels/i.test(h)) { if (h.indexOf('?') < 0) { lab_.nums = ''; lab_.start = 1; } return showLabels(h); }
     if (/^#\/settings/i.test(h)) return showSettings();
@@ -1042,7 +1197,7 @@
 
   $('signout').onclick = signOut;
   window.addEventListener('hashchange', () => { if (state.data) route(); });
-  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); state.installEvt = e; if (state.data && (location.hash || '#/') === '#/') showHome(); });
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); state.installEvt = e; if (state.data && /^#\/(more)?$/.test(location.hash || '#/')) route(); });
   window.addEventListener('appinstalled', () => { state.installEvt = null; });
   if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   start();
