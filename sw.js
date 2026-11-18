@@ -1,6 +1,6 @@
 // Keeps the app screens available when the phone is offline. Always tries the network first,
 // so a new version uploaded to GitHub shows up straight away.
-const CACHE = 'hf-shell-v9';
+const CACHE = 'hf-shell-v10';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'qrcode.js', 'jsQR.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => c.add(u).catch(() => {}))))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

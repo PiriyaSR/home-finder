@@ -179,8 +179,9 @@
     try {
       for (let i = 0; i < miss.length; i += 60) {
         Object.assign(state.thumbs, await api('getThumbs', { ids: miss.slice(i, i + 60) }));
+        fillImgs();
       }
-      saveThumbCache(); fillImgs();
+      saveThumbCache();
     } catch (e) {}
   }
   function fillImgs() {
@@ -915,10 +916,12 @@
     const draw = () => {
       const q = norm(($('flt') || {}).value);
       $('list').innerHTML = list.filter(b => !q || norm([b.box_id, b.name, b.looks_like, b.owner, typeName(b.type_id), locLabel(b.loc_id)].join(' ')).indexOf(q) !== -1).map(b =>
-        '<button class="row" data-id="' + esc(b.box_id) + '">' + thumbImg(b.cover_photo_id) +
+        '<div class="boxwrap"><button class="row" data-id="' + esc(b.box_id) + '">' + thumbImg(b.cover_photo_id) +
         '<span class="rt"><b>' + esc(b.name) + '</b><span class="id">' + esc(b.box_id) + '</span><span class="sub">' +
-        esc([typeName(b.type_id), locLabel(b.loc_id) || 'No place yet'].filter(Boolean).join(' · ')) + '</span></span></button>').join('');
+        esc([typeName(b.type_id), locLabel(b.loc_id) || 'No place yet'].filter(Boolean).join(' · ')) + '</span></span></button>' +
+        '<button class="seeitems" data-see="' + esc(b.box_id) + '">See items (' + currentItems(b).length + ') <span class="ta">பொருட்களைப் பார்</span></button></div>').join('');
       $('list').querySelectorAll('.row').forEach(r => { r.onclick = () => go('#/box/' + r.getAttribute('data-id')); });
+      $('list').querySelectorAll('.seeitems').forEach(r => { r.onclick = () => go('#/gallery/' + r.getAttribute('data-see')); });
       fillImgs();
     };
     draw();
@@ -951,6 +954,7 @@
       kv('Whose', 'யாருடையது', box.owner) + kv('Notes', 'குறிப்பு', box.notes) + '</section>' +
       '<h2>Inside this box <span class="ta">பெட்டியின் உள்ளே</span></h2>' +
       (items.length ? items.map(itemRow).join('') : '<p class="note">Nothing saved inside yet. <span class="ta">இன்னும் எதுவும் இல்லை.</span></p>') +
+      (items.length ? btn('bGal', 'See items as pictures', 'tape', 'படங்களாகப் பார்') : '') +
       btn('bAdd', 'Add an item', 'primary', 'பொருள் சேர்') +
       btn('bMove', 'Move this box', 'tape', 'பெட்டியை நகர்த்து') + btn('bEdit', 'Change details', 'ghost', 'விவரங்களை மாற்று') +
       btn('bPrint', 'Print this label again', 'ghost', 'லேபிளை மீண்டும் அச்சிடு') +
@@ -960,11 +964,26 @@
       btn('bBack', 'Back to start', 'ghost', 'முகப்புக்குத் திரும்பு'));
     on('bPast', () => go('#/past/' + id)); on('bFresh', () => go('#/fresh/' + id)); on('bHist', () => go('#/history?target=' + id)); on('bHide', () => go('#/hide/' + id));
     on('bPrint', () => go('#/labels?kind=box&ids=' + id));
-    on('bAdd', () => go('#/additem/' + id));
+    on('bAdd', () => go('#/additem/' + id)); on('bGal', () => go('#/gallery/' + id));
     on('bMove', () => go('#/move/' + id)); on('bEdit', () => go('#/edit/' + id)); on('bBack', () => go('#/'));
     on('bPhoto', () => openBig(box.cover_photo_id));
     view.querySelectorAll('.row[data-item]').forEach(r => { r.onclick = () => go('#/item/' + r.getAttribute('data-item')); });
     needThumbs([box.cover_photo_id].concat(items.map(i => i.photo_id)));
+  }
+
+  function showGallery(raw) {
+    const id = normId(raw), box = id && findBox(id);
+    if (!box) return go('#/boxes');
+    const items = currentItems(box).sort((a, b) => a.name.localeCompare(b.name));
+    page('<h1>' + esc(box.name) + ' <span class="id">' + esc(box.box_id) + '</span></h1>' +
+      '<p class="note">' + items.length + ' items. Scroll and tap a picture. <span class="ta">உருட்டிப் பார்த்து, படத்தைத் தொடவும்.</span></p>' +
+      '<div class="gal">' + items.map(i => '<button class="tile" data-item="' + esc(i.item_id) + '" aria-label="' + esc(i.name) + '">' +
+        (i.photo_id ? '<img data-pid="' + esc(i.photo_id) + '" alt="" src="' + (state.thumbs[i.photo_id] || BLANK) + '">' : '<span class="nophoto">' + esc(i.name) + '</span>') + '</button>').join('') + '</div>' +
+      (items.length ? '' : '<p class="note">Nothing saved inside yet.</p>') +
+      btn('bBox', 'Back to this box', 'primary', 'பெட்டிக்குத் திரும்பு') + btn('bAll', 'All boxes', 'ghost', 'எல்லா பெட்டிகள்'));
+    view.querySelectorAll('.tile').forEach(t => { t.onclick = () => go('#/item/' + t.getAttribute('data-item')); });
+    on('bBox', () => go('#/box/' + id)); on('bAll', () => go('#/boxes'));
+    fillImgs(); needThumbs(items.map(i => i.photo_id));
   }
 
   function showBoxForm(raw, mode) {
@@ -1252,6 +1271,7 @@
     const d = s => { try { return decodeURIComponent(s); } catch (e) { return s; } };
     let m;
     if ((m = h.match(/^#\/box\/([^/?]+)/i))) return showBox(d(m[1]));
+    if ((m = h.match(/^#\/gallery\/([^/?]+)/i))) return showGallery(d(m[1]));
     if ((m = h.match(/^#\/setup\/([^/?]+)/i))) return showBoxForm(d(m[1]), 'new');
     if ((m = h.match(/^#\/edit\/([^/?]+)/i))) return showBoxForm(d(m[1]), 'edit');
     if ((m = h.match(/^#\/move\/([^/?]+)/i))) return showMove(d(m[1]));
